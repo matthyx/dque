@@ -59,6 +59,7 @@ func TestSegment(t *testing.T) {
 		t.Fatalf("Remove() failed with '%s'\n", err.Error())
 	}
 	assert(t, 1 == seg.size(), "Expected size of 1")
+	_ = seg.close() // close the segment to flush data to disk
 
 	//
 	// Recreate the segment from disk and remove the remaining item

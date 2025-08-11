@@ -25,6 +25,7 @@ import (
 	"path"
 	"sync"
 
+	"github.com/ncw/directio"
 	"github.com/pkg/errors"
 )
 
@@ -71,7 +72,7 @@ type qSegment struct {
 	number        int
 	objects       []interface{}
 	objectBuilder func() interface{}
-	file          *os.File
+	file          *DirectIOWriter
 	mutex         sync.Mutex
 	removeCount   int
 	turbo         bool
@@ -93,13 +94,12 @@ func (seg *qSegment) load() error {
 		return errors.Wrap(err, "error opening file: "+seg.filePath())
 	}
 	defer f.Close()
-	seg.file = f
 
 	// Loop until we can load no more
 	for {
 		// Read the 4 byte length of the gob
 		lenBytes := make([]byte, 4)
-		if n, err := io.ReadFull(seg.file, lenBytes); err != nil {
+		if n, err := io.ReadFull(f, lenBytes); err != nil {
 			if err == io.EOF {
 				return nil
 			}
@@ -126,7 +126,7 @@ func (seg *qSegment) load() error {
 		}
 
 		data := make([]byte, int(gobLen))
-		if _, err := io.ReadFull(seg.file, data); err != nil {
+		if _, err := io.ReadFull(f, data); err != nil {
 			return ErrCorruptedSegment{
 				Path: seg.filePath(),
 				Err:  errors.Wrap(err, "error reading gob data from file"),
@@ -276,7 +276,7 @@ func (seg *qSegment) delete() error {
 	seg.mutex.Lock()
 	defer seg.mutex.Unlock()
 
-	if err := seg.file.Close(); err != nil {
+	if err := seg.file.wr.Close(); err != nil {
 		return errors.Wrap(err, "unable to close the segment file before deleting")
 	}
 
@@ -385,8 +385,8 @@ func newQueueSegment(dirPath string, number int, turbo bool, builder func() inte
 	}
 
 	// Create the file in append mode
-	var err error
-	seg.file, err = os.OpenFile(seg.filePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := directio.OpenFile(seg.filePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	seg.file = NewDirectIOWriter(f)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error creating file: %s.", seg.filePath())
 	}
@@ -414,8 +414,8 @@ func openQueueSegment(dirPath string, number int, turbo bool, builder func() int
 	}
 
 	// Re-open the file in append mode
-	var err error
-	seg.file, err = os.OpenFile(seg.filePath(), os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := directio.OpenFile(seg.filePath(), os.O_APPEND|os.O_WRONLY, 0644)
+	seg.file = NewDirectIOWriter(f)
 	if err != nil {
 		return nil, errors.Wrap(err, "error opening file: "+seg.filePath())
 	}
